@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset=utf-8>
+    <title>Hello WebGl with three.js</title>
+    <style>
+        body {
+            margin: 0;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%
+        }
+    </style>
+    <script src="https://cdn.rawgit.com/mrdoob/three.js/master/build/three.min.js"></script>
+</head>
+
+<body>
+    <script>
+        var renderer;
+        var scene, camera, light;
+        var geometry, material, mesh;
+
+        init();
+        sceneSetup();
+        meshSetup();
+        animate();
+
+        function init() {
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+        }
+
+        function sceneSetup() {
+            scene = new THREE.Scene();
+
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 10);
+            camera.position.y = 2;
+            camera.position.z = 6;
+            camera.rotation.x = THREE.Math.degToRad (-15);
+
+            geometry = new THREE.Geometry();
+            material = new THREE.MeshLambertMaterial();
+            mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+
+            light = new THREE.PointLight(0xffffff, 1, 100);
+            light.position.set(5, 5, 5);
+            scene.add(light);
+        }
+
+        function meshSetup() {
+            var plane = new THREE.PlaneGeometry( 5, 5, 4, 4 );
+            var planeMesh = new THREE.Mesh(plane);
+            planeMesh.rotation.x = THREE.Math.degToRad (-90);
+            planeMesh.updateMatrix();
+            geometry.merge(planeMesh.geometry, planeMesh.matrix);
+
+            var box = new THREE.BoxGeometry(1, 1, 1);
+            var boxMesh = new THREE.Mesh(box);
+            boxMesh.position.set(0, 0.5, 0);
+            boxMesh.updateMatrix();
+            geometry.merge(boxMesh.geometry, boxMesh.matrix);
+            
+            boxMesh.position.set(-1.5, 0.5, -1);
+            boxMesh.rotation.y = THREE.Math.degToRad (60);
+            boxMesh.updateMatrix();
+            geometry.merge(boxMesh.geometry, boxMesh.matrix);
+
+            boxMesh.position.set(1.5, 1, -1);
+            boxMesh.scale.set (0.5,2,0.5);
+            boxMesh.rotation.y = THREE.Math.degToRad (-45);
+            boxMesh.updateMatrix();
+            geometry.merge(boxMesh.geometry, boxMesh.matrix);
+
+            boxMesh.position.set(-1.5, 0.43, 1.5);
+            boxMesh.scale.set (0.5, 0.5, 0.5);
+            boxMesh.rotation.y = THREE.Math.degToRad (0);
+            boxMesh.rotation.x = THREE.Math.degToRad (40);
+            boxMesh.rotation.z = THREE.Math.degToRad (40);
+            boxMesh.updateMatrix();
+            geometry.merge(boxMesh.geometry, boxMesh.matrix);
+
+            var sphere = new THREE.SphereGeometry(1, 16, 16 );
+            var sphereMesh = new THREE.Mesh(sphere);
+            sphereMesh.position.set(1.5, 1, 1);
+            sphereMesh.updateMatrix();
+            geometry.merge(sphereMesh.geometry, sphereMesh.matrix);
+            
+            sphereMesh.position.set(-1.5, 1.5, -1);
+            sphereMesh.scale.set (0.5,0.5,0.5);
+            sphereMesh.updateMatrix();
+            geometry.merge(sphereMesh.geometry, sphereMesh.matrix);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            mesh.rotation.y += 0.005;
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+
+</html>
