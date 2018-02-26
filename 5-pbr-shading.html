@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset=utf-8>
+    <title>WebGL #5 - PBR Shading</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: black;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/90/three.js"></script>
+</head>
+
+<body>
+    An Implement of <a href="http://www.jordanstevenstechart.com/physically-based-rendering" target="_blank">http://www.jordanstevenstechart.com/physically-based-rendering</a>
+    
+    <script type="x-shader/x-vertex" id="vertexShader">
+        varying vec3 vNormal;
+        varying vec3 vFragPos;
+        varying vec3 vTangent;
+        varying vec3 vBitangent;
+        void main() {
+            vec4 worldPos = modelViewMatrix * vec4(position, 1.0);
+            gl_Position = projectionMatrix * worldPos;
+
+            vNormal = normalMatrix * normal;
+            vFragPos = worldPos.xyz;
+        }
+    </script>
+
+    <script type="x-shader/x-fragment" id="fragmentShader">
+        struct Material {
+            vec3 color;         // diffuse color
+            vec3 specularColor; // specular color
+            float glossiness;   // smoothness, 0~1
+            float metallic;     // 0~1
+            float anisotropic;  // -20~1
+            float ior;          // 1~4
+        };
+        
+        struct DirectionalLight {
+            vec3 color;
+            vec3 direction;
+            vec3 position;
+        };
+
+        uniform Material material;
+        uniform vec3 ambient;
+        uniform DirectionalLight light;
+        
+        varying vec3 vNormal;
+        varying vec3 vFragPos;
+        varying vec3 vTangent;
+        varying vec3 vBitangent;
+
+        float BlinnPhongNormalDistribution(float NdotH, float specularpower, float speculargloss) {
+            float distribution = pow(NdotH,speculargloss) * specularpower;
+            distribution *= (2.0 + specularpower) / 6.283185307;
+            return distribution;
+        }
+
+        float BeckmannNormalDistribution(float roughness, float NdotH) {
+            float roughnessSqr = roughness * roughness;
+            float NdotHSqr = NdotH * NdotH;
+            return max(0.000001, (1.0 / (3.1415926535 * roughnessSqr * NdotHSqr * NdotHSqr)) * exp((NdotHSqr - 1.0) / (roughnessSqr * NdotHSqr)));
+        }
+
+        float GaussianNormalDistribution(float roughness, float NdotH) {
+            float roughnessSqr = roughness * roughness;
+            float thetaH = acos(NdotH);
+            return exp(-thetaH * thetaH / roughnessSqr);
+        }
+
+        float GGXNormalDistribution(float roughness, float NdotH) {
+            float roughnessSqr = roughness * roughness;
+            float NdotHSqr = NdotH * NdotH;
+            float TanNdotHSqr = (1.0 - NdotHSqr) / NdotHSqr;
+            float fact = roughness / (NdotHSqr * (roughnessSqr + TanNdotHSqr));
+            return (1.0 / 3.1415926535) * fact * fact;
+        }
+
+        float TrowbridgeReitzNormalDistribution(float NdotH, float roughness) {
+            float roughnessSqr = roughness * roughness;
+            float Distribution = NdotH * NdotH * (roughnessSqr - 1.0) + 1.0;
+            return roughnessSqr / (3.1415926535 * Distribution * Distribution);
+        }
+
+        float ImplicitGSF (float NdotL, float NdotV) {
+            return NdotL * NdotV;       
+        }
+
+        float AshikhminShirleyGSF (float NdotL, float NdotV, float LdotH){
+            return NdotL * NdotV / (LdotH * max(NdotL,NdotV));
+        }
+
+        float NeumannGSF (float NdotL, float NdotV) {
+            return (NdotL * NdotV) / max(NdotL, NdotV);       
+        }
+
+        float ModifiedKelemenGSF (float NdotV, float NdotL, float roughness) {
+            float c = 0.797884560802865;    // c = sqrt(2 / Pi)
+            float k = roughness * roughness * c;
+            float gH = NdotV  * k + (1.0 - k);
+            return (gH * gH * NdotL);
+        }
+
+        float CookTorrenceGSF (float NdotL, float NdotV, float VdotH, float NdotH) {
+            return min(1.0, min(NdotV, NdotL) * 2.0 * NdotH / VdotH);
+        }
+
+        float WardGSF (float NdotL, float NdotV, float VdotH, float NdotH) {
+            return sqrt(NdotL * NdotV);
+        }
+
+        float KurtGSF (float NdotL, float NdotV, float VdotH, float roughness) {
+            return NdotL * NdotV / (VdotH * pow(NdotL * NdotV, roughness));
+        }
+
+        float WalterEtAlGSF (float NdotL, float NdotV, float roughness) {
+            float roughnessSqr = roughness * roughness;
+            float NdotLSqr = NdotL * NdotL;
+            float NdotVSqr = NdotV * NdotV;
+            float SmithL = 2.0 / (1.0 + sqrt(1.0 + roughnessSqr * (1.0 - NdotLSqr) / NdotLSqr));
+            float SmithV = 2.0 / (1.0 + sqrt(1.0 + roughnessSqr * (1.0 - NdotVSqr) / NdotVSqr));
+            return SmithL * SmithV;
+        }
+
+        float BeckmanGSF (float NdotL, float NdotV, float roughness) {
+            float roughnessSqr = roughness * roughness;
+            float NdotLSqr = NdotL * NdotL;
+            float NdotVSqr = NdotV * NdotV;
+            float calulationL = NdotL / (roughnessSqr * sqrt(1.0 - NdotLSqr));
+            float calulationV = NdotV / (roughnessSqr * sqrt(1.0 - NdotVSqr));
+            float SmithL = calulationL < 1.6 ? (((3.535 * calulationL) + (2.181 * calulationL * calulationL)) / (1.0 + (2.276 * calulationL) + (2.577 * calulationL * calulationL))) : 1.0;
+            float SmithV = calulationV < 1.6 ? (((3.535 * calulationV) + (2.181 * calulationV * calulationV)) / (1.0 + (2.276 * calulationV) + (2.577 * calulationV * calulationV))) : 1.0;
+            return SmithL * SmithV;
+        }
+
+        float GGXGSF (float NdotL, float NdotV, float roughness) {
+            float roughnessSqr = roughness * roughness;
+            float NdotLSqr = NdotL * NdotL;
+            float NdotVSqr = NdotV * NdotV;
+            float SmithL = (2.0 * NdotL) / (NdotL + sqrt(roughnessSqr + (1.0 - roughnessSqr) * NdotLSqr));
+            float SmithV = (2.0 * NdotV) / (NdotV + sqrt(roughnessSqr + (1.0 - roughnessSqr) * NdotVSqr));
+            return SmithL * SmithV;
+        }
+
+        float SchlickGSF (float NdotL, float NdotV, float roughness) {
+            float roughnessSqr = roughness * roughness;
+            float SmithL = NdotL / (NdotL * (1.0 - roughnessSqr) + roughnessSqr);
+            float SmithV = NdotV / (NdotV * (1.0 - roughnessSqr) + roughnessSqr);
+            return SmithL * SmithV; 
+        }
+
+        float SchlickBeckmanGSF (float NdotL, float NdotV, float roughness){
+            float roughnessSqr = roughness * roughness;
+            float k = roughnessSqr * 0.797884560802865;
+            float SmithL = NdotL / (NdotL * (1.0 - k) + k);
+            float SmithV = NdotV / (NdotV * (1.0 - k) + k);
+            return SmithL * SmithV;
+        }
+
+        float SchlickGGXGSF (float NdotL, float NdotV, float roughness){
+            float k = roughness / 2.0;
+            float SmithL = NdotL / (NdotL * (1.0 - k) + k);
+            float SmithV = NdotV / (NdotV * (1.0 - k) + k);
+            return SmithL * SmithV;
+        }
+
+        float SchlickFresnel (float i) {
+            float x = clamp(1.0 - i, 0.0, 1.0);
+            float x2 = x * x;
+            return x2 * x2 * x;
+        }
+
+        float F0 (float NdotL, float NdotV, float LdotH, float roughness){
+            float fresnelLight = SchlickFresnel(NdotL); 
+            float fresnelView = SchlickFresnel(NdotV);
+            float diffuse90 = 0.5 + 2.0 * LdotH * LdotH * roughness;
+            return mix(1.0, diffuse90, fresnelLight) * mix(1.0, diffuse90, fresnelView);
+        }
+
+        vec3 SchlickFresnelFunction (vec3 specularColor, float LdotH){
+            return mix(specularColor, vec3(1,1,1), SchlickFresnel(LdotH));
+        }
+
+        float SchlickIORFresnelFunction(float ior, float LdotH){
+            float a = ior - 1.0;
+            float b = ior + 1.0;
+            float f0 = (a * a) / (b * b);
+            return f0 + (1.0 - f0) * SchlickFresnel(LdotH);
+        }
+
+        void main() {
+            vec3 normalDir = normalize(vNormal);
+            vec3 lightDir = normalize(light.position - vFragPos);
+            vec3 lightReflectDir = reflect(-lightDir, normalDir);
+            vec3 viewDir = normalize(cameraPosition - vFragPos);
+            vec3 viewReflectDir = normalize(reflect(-viewDir, normalDir));
+            vec3 halfDir = normalize(lightDir + viewDir);
+
+            float NdotL = max(0.0, dot(normalDir, lightDir));
+            float NdotH = max(0.0, dot(normalDir, halfDir));
+            float NdotV = max(0.0, dot(normalDir, viewDir));
+            float VdotH = max(0.0, dot(viewDir, halfDir));
+            float LdotH = max(0.0, dot(lightDir, halfDir));
+            float LdotV = max(0.0, dot(lightDir, viewDir)); 
+            float RdotV = max(0.0, dot(lightReflectDir, viewDir));
+
+            float roughness = 1.0 - (material.glossiness * material.glossiness);
+            roughness = roughness * roughness;
+            vec3 diffColor = material.color * (1.0 - material.metallic);
+            diffColor *= F0(NdotL, NdotV, LdotH, roughness);
+
+            vec3 specColor = mix(material.specularColor, material.color, material.metallic * 0.5);
+            vec3 specularDistribution = specColor;
+            float geometricShadow = 1.0;
+            vec3 fresnel = specColor;
+
+            // Specular - Normal Distribution
+            //specularDistribution *= BlinnPhongNormalDistribution(NdotH, material.glossiness,  max(1.0, material.glossiness * 40.0));
+            //specularDistribution *= BeckmannNormalDistribution(roughness, NdotH);
+            //specularDistribution *= GaussianNormalDistribution(roughness, NdotH);
+            specularDistribution *= GGXNormalDistribution(roughness, NdotH);
+            //specularDistribution *= TrowbridgeReitzNormalDistribution(roughness, NdotH);
+            //specularDistribution *= KurtGSF (NdotL, NdotV, VdotH, roughness);
+
+            // Geometric Shadowing
+            //geometricShadow *= ImplicitGSF (NdotL, NdotV);
+            //geometricShadow *= AshikhminShirleyGSF (NdotL, NdotV, LdotH);
+            //geometricShadow *= NeumannGSF (NdotL, NdotV);
+            //geometricShadow *= ModifiedKelemenGSF (NdotV, NdotL, roughness);
+            //geometricShadow *= CookTorrenceGSF (NdotL, NdotV, VdotH, NdotH);
+            //geometricShadow *= WardGSF (NdotL, NdotV, VdotH, NdotH);
+
+            // Smith Based GSF
+            //geometricShadow *= WalterEtAlGSF (NdotL, NdotV, roughness);
+            //geometricShadow *= BeckmanGSF (NdotL, NdotV, roughness);
+            geometricShadow *= GGXGSF (NdotL, NdotV, roughness);
+            //geometricShadow *= SchlickGSF (NdotL, NdotV, roughness);
+            //geometricShadow *= SchlickBeckmanGSF (NdotL, NdotV, roughness);
+            //geometricShadow *= SchlickGGXGSF (NdotL, NdotV, roughness);
+            
+            // Fresnel
+            //fresnel *= SchlickFresnelFunction(specColor, LdotH);
+            fresnel *= SchlickIORFresnelFunction(material.ior, LdotH);
+
+            vec3 attenColor = light.color;
+            vec3 ambient = ambient * material.color;
+            vec3 specularity = (specularDistribution * fresnel * geometricShadow) / (4.0 * (NdotL * NdotV));
+            vec3 lightingModel = ambient + (diffColor + specularity) * attenColor;
+            gl_FragColor = vec4(lightingModel, 1);
+        }
+    </script>
+
+    <script>
+        var renderer, clock;
+        var camera, scene;
+        var geometry, meshs = [];
+        var uniforms;
+
+        init();
+        renderUpdate();
+
+        function init() {
+            // clock
+            clock = new THREE.Clock();
+
+            // camera
+            var width = window.innerWidth, height = window.innerHeight;
+            camera = new THREE.PerspectiveCamera(70, width / height, 0.01, 100);
+            camera.position.set(0, 0, 6);
+            // camera = new THREE.OrthographicCamera(width / - 100, width / 100, height / 100, height / - 100, 0.1, 10);
+            // camera.position.set(0, 0, 10);
+
+            // scene & buffer
+            scene = new THREE.Scene();
+
+            // shader material
+            uniforms = {
+                material: {
+                    value: {
+                        color: new THREE.Color(1, 0.2, 0.2),
+                        specularColor: new THREE.Color(1, 0.8, 0.8),
+                        glossiness: 0.8,
+                        metallic: 0.3,
+                        anisotropic: 0.0,
+                        ior: 4
+                    }
+                },
+                ambient: new THREE.Uniform(new THREE.Color(0.2, 0.2, 0.2)),
+                light: {
+                    value: {
+                        color: new THREE.Color(0.8, 0.8, 0.8),
+                        direction: new THREE.Vector3(1, -2, -3),
+                        position: new THREE.Vector3(-3, 3, 0)
+                    }
+                }
+            };
+
+            var vertexShader = document.getElementById('vertexShader').textContent;
+            var fragmentShader = document.getElementById('fragmentShader').textContent;
+            var shaderMat = new THREE.ShaderMaterial({
+                uniforms: uniforms,
+                vertexShader: vertexShader,
+                fragmentShader: fragmentShader,
+                side: THREE.FrontSide
+            });
+
+            // mesh
+            geometry = new THREE.SphereGeometry(1, 64, 32);
+            meshs.push(new THREE.Mesh(geometry, shaderMat));
+            meshs[0].position.x = -2;
+            scene.add(meshs[0]);
+
+            geometry = new THREE.TorusKnotGeometry(1, 0.3, 128, 16);
+            meshs.push(new THREE.Mesh(geometry, shaderMat));
+            meshs[1].position.x = 2;
+            scene.add(meshs[1]);
+
+            // renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+        }
+
+        var test = 0.0;
+        function renderUpdate() {
+            requestAnimationFrame(renderUpdate);
+
+            var deltaTime = clock.getDelta();
+            meshs[1].rotation.x += deltaTime * 0.3;
+            meshs[1].rotation.y += deltaTime * 0.3;
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+
+</html>
