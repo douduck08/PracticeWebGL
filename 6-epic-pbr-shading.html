@@ -148,18 +148,26 @@
             // camera = new THREE.OrthographicCamera(width / - 100, width / 100, height / 100, height / - 100, 0.1, 10);
             // camera.position.set(0, 0, 10);
 
+            // load texture
+            var path = "https://raw.githubusercontent.com/douduck08/PracticeWebGL/master/textures/";
+            var cubeTextureLoader = new THREE.CubeTextureLoader().setPath(path + "cubemaps/");
+            var envMap = cubeTextureLoader.load([
+                'room-px.png', 'room-nx.png',
+                'room-py.png', 'room-ny.png',
+                'room-pz.png', 'room-nz.png'
+            ]);
+            var BRDFIntegrationMap = new THREE.TextureLoader().setPath(path).load("integrateBrdf.png");
+
             // scene & buffer
             scene = new THREE.Scene();
-            scene.background = new THREE.CubeTextureLoader()
-                .setPath('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/cube/pisa/')
-                .load(['px.png', 'nx.png', 'py.png', 'ny.png', 'pz.png', 'nz.png']);
+            scene.background = envMap;
+                
 
             // shader material & mesh
             var vertexShader = document.getElementById('vertexShader').textContent;
             var fragmentShader = document.getElementById('fragmentShader').textContent;
             var ambient = new THREE.Color(1.0, 1.0, 1.0);
             var geometry = new THREE.SphereGeometry(1, 64, 32);
-            var BRDFIntegrationMap = new THREE.TextureLoader().load("https://jmonkeyengine.github.io/wiki/jme3/advanced/integrateBrdf.png");
 
             for (var x = 0; x < 8; x++) {
                 for (var y = 0; y < 8; y++) {
@@ -172,7 +180,7 @@
                                 specular: 0.5,
                             }
                         },
-                        envMap: new THREE.Uniform (scene.background),
+                        envMap: new THREE.Uniform (envMap),
                         BRDFMap: new THREE.Uniform (BRDFIntegrationMap),
                         ambient: new THREE.Uniform (ambient),
                         light: {
