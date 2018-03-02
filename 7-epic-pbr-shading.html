@@ -98,10 +98,10 @@
             vec3 F = SchlickFresnel (F0, LdotH);  // ks
             vec3 kd = (vec3(1.0) - F) * (1.0 - material.metallic);
             vec3 diffuse = material.color / 3.141592653;
+            
             float D= GGXNormalDistribution (material.roughness, NdotH);
             float G = SmithSchlickGGXGSF (NdotL, NdotV, material.roughness);
             vec3 specular = F * ((D * G) / (4.0 * NdotL * NdotV + 0.001));
-
             vec3 attenColor = light.color * NdotL;
             vec3 lighting = attenColor * (kd * diffuse + specular);
             
