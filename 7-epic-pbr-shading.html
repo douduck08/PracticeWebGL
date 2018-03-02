@@ -16,7 +16,7 @@
         }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/90/three.js"></script>
-    <script src="OrbitControls.js"></script>
+    <script src="js/OrbitControls.js"></script>
 </head>
 
 <body>
@@ -144,14 +144,14 @@
             var path = "https://raw.githubusercontent.com/douduck08/PracticeWebGL/master/textures/";
             var cubeTextureLoader = new THREE.CubeTextureLoader().setPath(path + "cubemaps/");
             var envMap = cubeTextureLoader.load([
-                'room-px.png', 'room-nx.png',
-                'room-py.png', 'room-ny.png',
-                'room-pz.png', 'room-nz.png'
+                'garden-px.png', 'garden-nx.png',
+                'garden-py.png', 'garden-ny.png',
+                'garden-pz.png', 'garden-nz.png'
             ]);
             var irradianceMap = cubeTextureLoader.load([
-                'room-light-px.png', 'room-light-nx.png',
-                'room-light-py.png', 'room-light-ny.png',
-                'room-light-pz.png', 'room-light-nz.png'
+                'garden-light-px.png', 'garden-light-nx.png',
+                'garden-light-py.png', 'garden-light-ny.png',
+                'garden-light-pz.png', 'garden-light-nz.png'
             ]);
             var BRDFIntegrationMap = new THREE.TextureLoader().setPath(path).load("integrateBrdf.png");
 
@@ -169,7 +169,7 @@
                     var uni = {
                         material: {
                             value: {
-                                color: new THREE.Color(1.0, 0.0, 0.0),
+                                color: new THREE.Color(0.8, 0.8, 0.8),
                                 roughness: 0.1 + 0.1 * x,
                                 metallic: 0.125 * y,
                                 specular: 0.5,
