@@ -3,7 +3,7 @@
 
 <head>
     <meta charset=utf-8>
-    <title>WebGL #6 - Epic Games, PBR Shading, Uncomplete</title>
+    <title>WebGL #7 - Epic Games, PBR Shading, Complete version</title>
     <style>
         body {
             margin: 0;
@@ -16,6 +16,7 @@
         }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/90/three.js"></script>
+    <script src="OrbitControls.js"></script>
 </head>
 
 <body>
@@ -44,36 +45,23 @@
         };
 
         uniform Material material;
-        uniform samplerCube envMap; 
+        uniform samplerCube envMap;
+        uniform samplerCube irradianceMap;
         uniform sampler2D BRDFMap;
-        uniform vec3 ambient;
         uniform PointLight light;
         
         varying vec3 vNormal;
         varying vec3 vFragPos;
 
-        float SchlickFresnel (float c) {
-            float x = clamp(1.0 - c, 0.0, 1.0);
-            float x2 = x * x;
-            return x2 * x2 * x;
-        }
-
-        float BurleyDiffuse (float NdotL, float NdotV, float LdotH, float roughness) {
-            float fresnelLight = SchlickFresnel(NdotL); 
-            float fresnelView = SchlickFresnel(NdotV);
-            float d90 = 0.5 + 2.0 * LdotH * LdotH * roughness;
-            float fact = (1.0 + (d90 - 1.0) * fresnelLight) * (1.0 + (d90 - 1.0) * fresnelView);
-            return fact / 3.1415926535;
-        }
-
         float GGXNormalDistribution(float roughness, float NdotH) {
             float alpha = roughness * roughness;
+            float alphaSqr = alpha * alpha;
             float NdotHSqr = NdotH * NdotH;
-            float fact = alpha / (NdotHSqr * (alpha * alpha - 1.0) + 1.0);
-            return fact * fact / 3.1415926535;
+            float fact = NdotHSqr * (alphaSqr - 1.0) + 1.0;
+            return alphaSqr / (3.1415926535 * fact * fact);
         }
 
-        float SchlickGGXGSF (float NdotL, float NdotV, float roughness) {
+        float SmithSchlickGGXGSF (float NdotL, float NdotV, float roughness) {
             roughness = roughness + 1.0;
             float k = roughness * roughness / 8.0;
             float SmithL = NdotL / (NdotL * (1.0 - k) + k);
@@ -81,15 +69,11 @@
             return SmithL * SmithV;
         }
 
-        float SphericalGaussianFresnel (float ior, float LdotH) {
-            float a = ior - 1.0;
-            float b = ior + 1.0;
-            float f0 = (a * a) / (b * b);
-            return f0 + (1.0 - f0) * SchlickFresnel(LdotH);
-        }
-
-        vec3 SchlickFresnelFunction (vec3 specularColor, float LdotH) {
-            return specularColor + (vec3(1,1,1) - specularColor) * SchlickFresnel(LdotH);
+        vec3 SchlickFresnel (vec3 F0, float LdotH) {
+            float x = clamp(1.0 - LdotH, 0.0, 1.0);
+            float x2 = x * x;
+            float x5 =  x2 * x2 * x;
+            return F0 + (vec3(1) - F0) * x5;
         }
 
         void main() {
@@ -108,24 +92,25 @@
             float LdotV = max(0.0, dot(lightDir, viewDir)); 
             float RdotV = max(0.0, dot(lightReflectDir, viewDir));
 
-            vec3 diffuse = material.color * (1.0 - material.metallic);
-            diffuse *= BurleyDiffuse (NdotL, NdotV, LdotH, material.roughness);
-
-            vec3 dielectricColor = vec3(0.08 * material.specular);
-            vec3 specularColor = mix(dielectricColor, material.color, material.metallic);
+            // F0 = 0.08 * specular, default specular = 0.5
+            vec3 F0 = vec3(0.04);
+            F0 = mix(F0, material.color, material.metallic);  // specular color
+            vec3 F = SchlickFresnel (F0, LdotH);  // ks
+            vec3 kd = (vec3(1.0) - F) * (1.0 - material.metallic);
+            vec3 diffuse = material.color / 3.141592653;
             float D= GGXNormalDistribution (material.roughness, NdotH);
-            float G = SchlickGGXGSF (NdotL, NdotV, material.roughness);
-            vec3 F = SchlickFresnelFunction (specularColor, LdotH);
-            vec3 specular = F * ((D * G) / (4.0 * NdotL * NdotV));
+            float G = SmithSchlickGGXGSF (NdotL, NdotV, material.roughness);
+            vec3 specular = F * ((D * G) / (4.0 * NdotL * NdotV + 0.001));
+
+            vec3 attenColor = light.color * NdotL;
+            vec3 lighting = attenColor * (kd * diffuse + specular);
             
+            vec3 indirectDiffuse = textureCube(irradianceMap, viewReflectDir).rgb * diffuse;
             vec3 envColor = textureCube(envMap, viewReflectDir).rgb;
             vec2 envBRDF = texture2D(BRDFMap, vec2(material.roughness, NdotV)).xy;
-            vec3 indirectDiffuse = ambient * diffuse;  // simple way
-            vec3 indirectSpecular = envColor * (specularColor * envBRDF.x + envBRDF.y);
+            vec3 indirectSpecular = envColor * (F0 * envBRDF.x + envBRDF.y);
 
-            vec3 attenColor = light.color;
-            vec3 lightingModel = indirectDiffuse + indirectSpecular + (diffuse + specular) * attenColor;
-            gl_FragColor = vec4(lightingModel, 1);
+            gl_FragColor = vec4(indirectDiffuse + indirectSpecular + lighting, 1);
         }
     </script>
 
@@ -148,6 +133,13 @@
             // camera = new THREE.OrthographicCamera(width / - 100, width / 100, height / 100, height / - 100, 0.1, 10);
             // camera.position.set(0, 0, 10);
 
+            //controls
+            var controls = new THREE.OrbitControls( camera );
+            controls.enableZoom = false;
+            controls.enablePan = false;
+            controls.minPolarAngle = Math.PI / 4;
+            controls.maxPolarAngle = Math.PI / 1.5;
+
             // load texture
             var path = "https://raw.githubusercontent.com/douduck08/PracticeWebGL/master/textures/";
             var cubeTextureLoader = new THREE.CubeTextureLoader().setPath(path + "cubemaps/");
@@ -156,17 +148,20 @@
                 'room-py.png', 'room-ny.png',
                 'room-pz.png', 'room-nz.png'
             ]);
+            var irradianceMap = cubeTextureLoader.load([
+                'room-light-px.png', 'room-light-nx.png',
+                'room-light-py.png', 'room-light-ny.png',
+                'room-light-pz.png', 'room-light-nz.png'
+            ]);
             var BRDFIntegrationMap = new THREE.TextureLoader().setPath(path).load("integrateBrdf.png");
 
             // scene & buffer
             scene = new THREE.Scene();
             scene.background = envMap;
-                
 
             // shader material & mesh
             var vertexShader = document.getElementById('vertexShader').textContent;
             var fragmentShader = document.getElementById('fragmentShader').textContent;
-            var ambient = new THREE.Color(1.0, 1.0, 1.0);
             var geometry = new THREE.SphereGeometry(1, 64, 32);
 
             for (var x = 0; x < 8; x++) {
@@ -174,19 +169,19 @@
                     var uni = {
                         material: {
                             value: {
-                                color: new THREE.Color(1, 0.2, 0.2),
-                                roughness: 0.125 * x,
+                                color: new THREE.Color(1.0, 0.0, 0.0),
+                                roughness: 0.1 + 0.1 * x,
                                 metallic: 0.125 * y,
                                 specular: 0.5,
                             }
                         },
                         envMap: new THREE.Uniform (envMap),
+                        irradianceMap: new THREE.Uniform (irradianceMap),
                         BRDFMap: new THREE.Uniform (BRDFIntegrationMap),
-                        ambient: new THREE.Uniform (ambient),
                         light: {
                             value: {
                                 color: new THREE.Color(1, 1, 1),
-                                position: new THREE.Vector3(-5, 5, 0)
+                                position: new THREE.Vector3(30, 30, 0)
                             }
                         }
                     };
